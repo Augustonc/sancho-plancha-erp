@@ -1,24 +1,14 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  LayoutDashboard, 
-  ShoppingCart, 
-  Package, 
-  Utensils, 
-  Users, 
-  Wallet, 
-  Plus, 
-  AlertCircle,
-  CheckCircle2,
-  TrendingUp,
-  TrendingDown,
-  DollarSign
+  LayoutDashboard, ShoppingCart, Package, Utensils, 
+  Users, Wallet, Plus, AlertCircle, CheckCircle2,
+  TrendingUp, TrendingDown, DollarSign, Settings, Trash2
 } from 'lucide-react';
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, addDoc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
-// Your web app's Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyAFl5q6u4WYsv60wOJk0-DJp4vtUYUBqgo",
   authDomain: "sancho-plancha.firebaseapp.com",
@@ -32,67 +22,25 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// --- DATOS INICIALES (MOCK DATA) ---
-// Simulamos una base de datos inicial para que puedas probar el sistema inmediatamente.
-const INITIAL_INGREDIENTS = [
-  { id: '1', nombre: 'Pan de Hamburguesa', unidad: 'unidades', costo: 150, stock: 50, stockMinimo: 20 },
-  { id: '2', nombre: 'Medallón de Carne', unidad: 'unidades', costo: 400, stock: 40, stockMinimo: 15 },
-  { id: '3', nombre: 'Pan de pancho/choripán', unidad: 'unidades', costo: 120, stock: 30, stockMinimo: 10 },
-  { id: '4', nombre: 'Chorizo', unidad: 'unidades', costo: 300, stock: 25, stockMinimo: 10 },
-  { id: '5', nombre: 'Aderezos', unidad: 'gramos', costo: 2, stock: 5000, stockMinimo: 1000 },
-  { id: '6', nombre: 'Lechuga', unidad: 'gramos', costo: 1.5, stock: 2000, stockMinimo: 500 },
-  { id: '7', nombre: 'Tomate', unidad: 'gramos', costo: 2.5, stock: 3000, stockMinimo: 1000 },
-];
-
-const INITIAL_PRODUCTS = [
-  { 
-    id: '1', 
-    nombre: 'Hamburguesa Completa', 
-    precioVenta: 2500, 
-    receta: [
-      { ingredienteId: '1', cantidad: 1 }, // 1 Pan
-      { ingredienteId: '2', cantidad: 1 }, // 1 Carne
-      { ingredienteId: '5', cantidad: 50 }, // 50g aderezo
-      { ingredienteId: '6', cantidad: 30 }, // 30g lechuga
-      { ingredienteId: '7', cantidad: 50 }, // 50g tomate
-    ] 
-  },
-  { 
-    id: '2', 
-    nombre: 'Choripán Especial', 
-    precioVenta: 1800, 
-    receta: [
-      { ingredienteId: '3', cantidad: 1 }, // 1 Pan
-      { ingredienteId: '4', cantidad: 2 }, // 2 Chorizos (como pediste en el ejemplo)
-      { ingredienteId: '5', cantidad: 80 }, // 80g aderezo
-      { ingredienteId: '6', cantidad: 20 }, // 20g lechuga
-      { ingredienteId: '7', cantidad: 40 }, // 40g tomate
-    ] 
-  }
-];
-
-const INITIAL_EMPLOYEES = [
-  { id: '1', nombre: 'Juan Pérez', valorHora: 1500 }
-];
-
 export default function App() {
-  // --- ESTADOS GLOBALES ---
-  const [activeTab, setActiveTab] = useState('pos');
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [user, setUser] = useState(null);
+  const [notificacion, setNotificacion] = useState('');
   
   const [ingredientes, setIngredientes] = useState([]);
   const [productos, setProductos] = useState([]);
   const [ventas, setVentas] = useState([]);
-  const [empleados, setEmpleados] = useState([]);
+  const [empleados, setEmpleados] = useState([{ id: 'emp1', nombre: 'Juan Pérez', valorHora: 1500 }]);
   const [jornadas, setJornadas] = useState([]);
   const [gastos, setGastos] = useState([]);
   const [deudas, setDeudas] = useState([]);
 
-  // --- CARRITO DE VENTAS (POS) ---
   const [carrito, setCarrito] = useState([]);
+  
+  // Estado para armar recetas nuevas en el panel de administración
+  const [recetaTemp, setRecetaTemp] = useState([]);
 
-  // --- EFECTOS FIREBASE ---
-  React.useEffect(() => {
+  useEffect(() => {
     const initAuth = async () => {
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
         await signInWithCustomToken(auth, __initial_auth_token);
@@ -105,11 +53,9 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!user) return;
-    
     const path = (colName) => collection(db, 'artifacts', appId, 'users', user.uid, colName);
-    
     const sub = (colName, setter) => onSnapshot(path(colName), 
       (snap) => setter(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
       (err) => console.error(err)
@@ -119,28 +65,19 @@ export default function App() {
       sub('ingredientes', setIngredientes),
       sub('productos', setProductos),
       sub('ventas', setVentas),
-      sub('empleados', setEmpleados),
       sub('jornadas', setJornadas),
       sub('gastos', setGastos),
       sub('deudas', setDeudas)
     ];
-
     return () => unsubs.forEach(u => u());
   }, [user]);
 
-  // Función para sembrar datos iniciales si la DB está vacía
-  const cargarDatosDePrueba = async () => {
-    if (!user) return;
-    const promises = [];
-    INITIAL_INGREDIENTS.forEach(ing => promises.push(setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'ingredientes', ing.id), ing)));
-    INITIAL_PRODUCTS.forEach(prod => promises.push(setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'productos', prod.id), prod)));
-    INITIAL_EMPLOYEES.forEach(emp => promises.push(setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'empleados', emp.id), emp)));
-    promises.push(setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'deudas', '1'), { proveedor: 'Carnicería Don Tito', monto: 15000, pagado: false, fecha: new Date().toISOString() }));
-    await Promise.all(promises);
-    alert("¡Datos de prueba cargados con éxito en la nube!");
+  const mostrarMensaje = (msj) => {
+    setNotificacion(msj);
+    setTimeout(() => setNotificacion(''), 4000);
   };
 
-  // --- FUNCIONES DE LÓGICA DE NEGOCIO ---
+  // --- LÓGICA CORE Y VENTAS ---
 
   const calcularCostoReceta = (receta) => {
     return receta.reduce((total, itemReceta) => {
@@ -149,65 +86,117 @@ export default function App() {
     }, 0);
   };
 
-  const agregarAlCarrito = (producto) => {
-    setCarrito([...carrito, producto]);
-  };
-
   const procesarVenta = async () => {
     if (carrito.length === 0 || !user) return;
-
     let totalIngreso = 0;
-    let totalCostoMateriaPrima = 0;
+    let totalCosto = 0;
     const ingredientesAActualizar = {};
 
-    // Procesar cada ítem del carrito
     carrito.forEach(producto => {
-      const costoReceta = calcularCostoReceta(producto.receta);
       totalIngreso += producto.precioVenta;
-      totalCostoMateriaPrima += costoReceta;
-
-      // Preparar descuentos de stock
-      producto.receta.forEach(itemReceta => {
-        const iId = itemReceta.ingredienteId;
-        if (ingredientesAActualizar[iId] === undefined) {
-          const ingActual = ingredientes.find(i => i.id === iId);
-          ingredientesAActualizar[iId] = ingActual ? ingActual.stock : 0;
+      totalCosto += calcularCostoReceta(producto.receta);
+      producto.receta.forEach(item => {
+        if (ingredientesAActualizar[item.ingredienteId] === undefined) {
+          const ing = ingredientes.find(i => i.id === item.ingredienteId);
+          ingredientesAActualizar[item.ingredienteId] = ing ? ing.stock : 0;
         }
-        ingredientesAActualizar[iId] -= itemReceta.cantidad;
+        ingredientesAActualizar[item.ingredienteId] -= item.cantidad;
       });
     });
 
-    const gananciaNetaTransaccion = totalIngreso - totalCostoMateriaPrima;
-
-    // Escribir en Firestore
-    const ventaData = {
-      fecha: new Date().toISOString(),
-      items: carrito,
-      totalIngreso,
-      totalCosto: totalCostoMateriaPrima,
-      gananciaNeta: gananciaNetaTransaccion
-    };
-
     try {
-      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'ventas'), ventaData);
+      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'ventas'), {
+        fecha: new Date().toISOString(),
+        items: carrito,
+        totalIngreso,
+        totalCosto,
+        gananciaNeta: totalIngreso - totalCosto
+      });
       
-      // Actualizar inventario en la base de datos
       for (const [id, nuevoStock] of Object.entries(ingredientesAActualizar)) {
         await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'ingredientes', id), { stock: nuevoStock });
       }
 
-      setCarrito([]); // Limpiar carrito local
-      alert(`¡Venta registrada en la nube!\nIngreso: $${totalIngreso}\nCosto: $${totalCostoMateriaPrima}\nGanancia Neta: $${gananciaNetaTransaccion}`);
+      setCarrito([]);
+      mostrarMensaje(`¡Venta registrada! Ganancia neta: $${totalIngreso - totalCosto}`);
     } catch (error) {
-      console.error("Error al procesar la venta:", error);
-      alert("Hubo un error al guardar la venta.");
+      mostrarMensaje("Error al procesar la venta.");
     }
   };
+
+  // --- LÓGICA DE ADMINISTRACIÓN Y CATÁLOGO ---
+
+  const crearIngrediente = async (e) => {
+    e.preventDefault();
+    if (!user) return;
+    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'ingredientes'), {
+      nombre: e.target.nombre.value,
+      unidad: e.target.unidad.value,
+      costo: parseFloat(e.target.costo.value),
+      stock: parseFloat(e.target.stock.value),
+      stockMinimo: parseFloat(e.target.stockMinimo.value)
+    });
+    e.target.reset();
+    mostrarMensaje("Ingrediente creado con éxito");
+  };
+
+  const eliminarDoc = async (coleccion, id) => {
+    if (!user) return;
+    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, coleccion, id));
+    mostrarMensaje("Elemento eliminado");
+  };
+
+  const agregarItemReceta = (e) => {
+    e.preventDefault();
+    const ingredienteId = e.target.ingredienteId.value;
+    const cantidad = parseFloat(e.target.cantidad.value);
+    const ing = ingredientes.find(i => i.id === ingredienteId);
+    if (ing && cantidad > 0) {
+      setRecetaTemp([...recetaTemp, { ingredienteId, nombre: ing.nombre, cantidad, costoParcial: ing.costo * cantidad }]);
+      e.target.reset();
+    }
+  };
+
+  const crearProducto = async (e) => {
+    e.preventDefault();
+    if (!user || recetaTemp.length === 0) {
+      mostrarMensaje("Agrega al menos un ingrediente a la receta.");
+      return;
+    }
+    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'productos'), {
+      nombre: e.target.nombre.value,
+      precioVenta: parseFloat(e.target.precioVenta.value),
+      receta: recetaTemp.map(r => ({ ingredienteId: r.ingredienteId, cantidad: r.cantidad }))
+    });
+    e.target.reset();
+    setRecetaTemp([]);
+    mostrarMensaje("Producto guardado con éxito");
+  };
+
+  const ingresarMercaderia = async (e) => {
+    e.preventDefault();
+    if (!user) return;
+    const ingId = e.target.ingredienteId.value;
+    const cantidadComprada = parseFloat(e.target.cantidad.value);
+    const nuevoCosto = parseFloat(e.target.nuevoCosto.value);
+    
+    const ingActual = ingredientes.find(i => i.id === ingId);
+    if(ingActual) {
+      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'ingredientes', ingId), {
+        stock: ingActual.stock + cantidadComprada,
+        costo: nuevoCosto || ingActual.costo
+      });
+      e.target.reset();
+      mostrarMensaje("Stock y costo actualizados");
+    }
+  };
+
+  // --- LÓGICA DE RRHH Y FINANZAS ---
 
   const registrarJornada = async (e) => {
     e.preventDefault();
     if (!user) return;
-    const empleadoId = e.target.empleadoId.value; // Ya es string
+    const empleadoId = e.target.empleadoId.value;
     const horas = parseFloat(e.target.horas.value);
     const empleado = empleados.find(emp => emp.id === empleadoId);
     
@@ -220,12 +209,14 @@ export default function App() {
         pagado: false
       });
       e.target.reset();
+      mostrarMensaje("Jornada registrada");
     }
   };
 
   const pagarJornada = async (id) => {
     if (!user) return;
     await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'jornadas', id), { pagado: true });
+    mostrarMensaje("Jornada pagada");
   };
 
   const registrarGasto = async (e) => {
@@ -237,6 +228,7 @@ export default function App() {
       fecha: new Date().toISOString()
     });
     e.target.reset();
+    mostrarMensaje("Gasto registrado");
   };
 
   const registrarDeuda = async (e) => {
@@ -249,15 +241,17 @@ export default function App() {
       pagado: false
     });
     e.target.reset();
+    mostrarMensaje("Deuda registrada");
   };
 
   const pagarDeuda = async (id) => {
     if (!user) return;
     await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'deudas', id), { pagado: true });
+    mostrarMensaje("Deuda saldada");
   };
 
+  // --- CÁLCULOS DEL DASHBOARD ---
 
-  // --- CÁLCULOS GLOBALES (DASHBOARD) ---
   const stats = useMemo(() => {
     const ventasTotales = ventas.reduce((acc, v) => acc + v.totalIngreso, 0);
     const costoMateriaPrima = ventas.reduce((acc, v) => acc + v.totalCosto, 0);
@@ -267,7 +261,6 @@ export default function App() {
     const deudasPagadas = deudas.filter(d => d.pagado).reduce((acc, d) => acc + d.monto, 0);
     const deudasPendientes = deudas.filter(d => !d.pagado).reduce((acc, d) => acc + d.monto, 0);
 
-    // Ganancia Neta = Ingresos - (Costo Materia Prima + Sueldos Pagados + Gastos Operativos + Deudas Pagadas)
     const gananciaNeta = ventasTotales - (costoMateriaPrima + sueldosPagados + gastosOperativos + deudasPagadas);
 
     return {
@@ -281,22 +274,13 @@ export default function App() {
     };
   }, [ventas, jornadas, gastos, deudas]);
 
-
-  // --- COMPONENTES DE VISTAS ---
+  // --- VISTAS ---
 
   const ViewDashboard = () => (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h2 className="text-2xl font-bold text-gray-800">Resumen General (Resultados)</h2>
-        {ingredientes.length === 0 && (
-          <button onClick={cargarDatosDePrueba} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold shadow transition-colors text-sm">
-            Cargar Datos Iniciales a Nube
-          </button>
-        )}
-      </div>
+      <h2 className="text-2xl font-bold text-gray-800">Resumen General (Resultados)</h2>
       
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Tarjeta Ganancia Neta */}
         <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-6 text-white shadow-lg">
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-medium opacity-90">Ganancia Neta (Caja Real)</h3>
@@ -306,7 +290,6 @@ export default function App() {
           <p className="text-sm mt-2 opacity-80">Lo que te queda en el bolsillo</p>
         </div>
 
-        {/* Tarjeta Ventas Totales */}
         <div className="bg-white rounded-xl p-6 shadow-md border border-gray-100">
           <div className="flex justify-between items-center text-gray-500">
             <h3 className="text-lg font-medium">Ingresos por Ventas</h3>
@@ -316,7 +299,6 @@ export default function App() {
           <p className="text-sm text-gray-500 mt-2">{ventas.length} ventas registradas</p>
         </div>
 
-        {/* Tarjeta Costos Totales */}
         <div className="bg-white rounded-xl p-6 shadow-md border border-gray-100">
           <div className="flex justify-between items-center text-gray-500">
             <h3 className="text-lg font-medium">Costos Totales (Pagados)</h3>
@@ -333,7 +315,6 @@ export default function App() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-         {/* Alertas de Liquidez y Deudas */}
          <div className="bg-orange-50 rounded-xl p-6 border border-orange-200">
           <h3 className="text-xl font-bold text-orange-800 flex items-center gap-2 mb-4">
             <AlertCircle className="w-6 h-6" /> Estado de Deudas y Fiado
@@ -356,7 +337,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Últimas Ventas */}
         <div className="bg-white rounded-xl p-6 shadow-md border border-gray-100 overflow-y-auto max-h-64">
           <h3 className="text-xl font-bold text-gray-800 mb-4">Últimas Ventas</h3>
           {ventas.length === 0 ? (
@@ -382,77 +362,111 @@ export default function App() {
     </div>
   );
 
-  const ViewPOS = () => (
-    <div className="flex flex-col md:flex-row gap-6 h-full">
-      {/* Menú de Productos */}
-      <div className="flex-1 bg-white p-6 rounded-xl shadow-md border border-gray-100">
-        <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-          <Utensils className="w-6 h-6 text-orange-500" /> Vender Producto
+  const ViewCatalog = () => (
+    <div className="space-y-6">
+      <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100">
+        <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <Settings className="w-5 h-5 text-gray-600" /> Crear Nuevo Ingrediente (Materia Prima)
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {productos.map(prod => (
-            <button 
-              key={prod.id}
-              onClick={() => agregarAlCarrito(prod)}
-              className="p-4 border-2 border-gray-200 rounded-xl hover:border-orange-500 hover:bg-orange-50 transition-all text-left group"
-            >
-              <h3 className="text-lg font-bold text-gray-800 group-hover:text-orange-600">{prod.nombre}</h3>
-              <p className="text-2xl font-black text-gray-900 mt-2">${prod.precioVenta}</p>
-              <p className="text-xs text-gray-500 mt-1">Costo aprox: ${calcularCostoReceta(prod.receta)}</p>
-            </button>
-          ))}
+        <form onSubmit={crearIngrediente} className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+          <input type="text" name="nombre" placeholder="Nombre (Ej. Pan)" className="p-2 border rounded" required />
+          <select name="unidad" className="p-2 border rounded" required>
+            <option value="unidades">Unidades</option>
+            <option value="gramos">Gramos</option>
+            <option value="litros">Litros</option>
+          </select>
+          <input type="number" step="0.01" name="costo" placeholder="Costo Unitario $" className="p-2 border rounded" required />
+          <input type="number" step="0.01" name="stock" placeholder="Stock Inicial" className="p-2 border rounded" required />
+          <input type="number" step="0.01" name="stockMinimo" placeholder="Stock Mínimo" className="p-2 border rounded" required />
+          <button type="submit" className="sm:col-span-5 bg-blue-600 text-white font-bold py-2 rounded">Guardar Ingrediente</button>
+        </form>
+
+        <div className="mt-6">
+          <h3 className="font-bold text-gray-700 mb-2">Ingredientes Actuales en BD:</h3>
+          <div className="flex flex-wrap gap-2">
+            {ingredientes.map(ing => (
+              <span key={ing.id} className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm flex items-center gap-2 border">
+                {ing.nombre} (${ing.costo}) 
+                <button onClick={() => eliminarDoc('ingredientes', ing.id)} className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4"/></button>
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Carrito */}
-      <div className="w-full md:w-96 bg-gray-50 p-6 rounded-xl shadow-md border border-gray-200 flex flex-col">
+      <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100">
         <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-          <ShoppingCart className="w-5 h-5 text-gray-600" /> Pedido Actual
+          <Utensils className="w-5 h-5 text-orange-500" /> Armar Nuevo Producto (Para Vender)
         </h2>
         
-        <div className="flex-1 overflow-y-auto space-y-2 mb-4">
-          {carrito.length === 0 ? (
-            <p className="text-gray-400 text-center mt-10">El carrito está vacío</p>
-          ) : (
-            carrito.map((item, index) => (
-              <div key={index} className="flex justify-between items-center bg-white p-3 rounded shadow-sm border border-gray-100">
-                <span className="font-medium text-gray-800">{item.nombre}</span>
-                <span className="font-bold text-gray-600">${item.precioVenta}</span>
-              </div>
-            ))
-          )}
+        <div className="bg-orange-50 p-4 rounded-lg mb-6 border border-orange-100">
+          <h3 className="font-medium text-orange-800 mb-2">1. Añadir ingredientes a la receta:</h3>
+          <form onSubmit={agregarItemReceta} className="flex gap-2">
+            <select name="ingredienteId" className="flex-1 p-2 border rounded" required>
+              <option value="">Selecciona un ingrediente...</option>
+              {ingredientes.map(ing => <option key={ing.id} value={ing.id}>{ing.nombre} (Medida en {ing.unidad})</option>)}
+            </select>
+            <input type="number" step="0.01" name="cantidad" placeholder="Cantidad usada" className="w-32 p-2 border rounded" required />
+            <button type="submit" className="bg-orange-500 text-white px-4 rounded font-bold">Añadir</button>
+          </form>
+          
+          <ul className="mt-3 space-y-1">
+            {recetaTemp.map((item, idx) => (
+              <li key={idx} className="text-sm text-gray-700 flex justify-between bg-white p-2 rounded border">
+                <span>{item.cantidad}x {item.nombre}</span>
+                <span className="font-medium text-orange-600">Costo: ${item.costoParcial}</span>
+              </li>
+            ))}
+          </ul>
         </div>
 
-        <div className="pt-4 border-t border-gray-200">
-          <div className="flex justify-between items-center mb-4">
-            <span className="text-lg font-medium text-gray-600">Total:</span>
-            <span className="text-3xl font-black text-gray-900">
-              ${carrito.reduce((acc, item) => acc + item.precioVenta, 0).toLocaleString()}
-            </span>
+        <form onSubmit={crearProducto} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <input type="text" name="nombre" placeholder="Nombre del Producto (Ej. Super Hamburguesa)" className="sm:col-span-2 p-2 border rounded text-lg font-medium" required />
+          <input type="number" name="precioVenta" placeholder="Precio de Venta al Público $" className="p-2 border rounded text-lg font-bold text-green-700" required />
+          <button type="submit" className="sm:col-span-3 bg-green-600 text-white font-bold py-3 rounded text-lg">Guardar Producto en Catálogo</button>
+        </form>
+
+        <div className="mt-6">
+          <h3 className="font-bold text-gray-700 mb-2">Productos a la venta:</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            {productos.map(prod => (
+              <div key={prod.id} className="bg-gray-50 p-3 rounded border text-sm flex justify-between items-start">
+                <div>
+                  <p className="font-bold">{prod.nombre}</p>
+                  <p className="text-green-600 font-medium">${prod.precioVenta}</p>
+                </div>
+                <button onClick={() => eliminarDoc('productos', prod.id)} className="text-red-500"><Trash2 className="w-4 h-4"/></button>
+              </div>
+            ))}
           </div>
-          <button 
-            onClick={procesarVenta}
-            disabled={carrito.length === 0}
-            className="w-full bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white font-bold py-4 rounded-xl transition-colors text-lg"
-          >
-            Cobrar y Descontar Stock
-          </button>
         </div>
       </div>
     </div>
   );
 
   const ViewInventory = () => (
-    <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-        <Package className="w-6 h-6 text-blue-500" /> Inventario y Stock
-      </h2>
-      <div className="overflow-x-auto">
+    <div className="space-y-6">
+      <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100">
+        <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <Package className="w-5 h-5 text-blue-500" /> Ingresar Compra de Mercadería
+        </h2>
+        <form onSubmit={ingresarMercaderia} className="flex flex-col md:flex-row gap-3">
+          <select name="ingredienteId" className="flex-1 p-2 border rounded" required>
+            <option value="">¿Qué compraste?</option>
+            {ingredientes.map(ing => <option key={ing.id} value={ing.id}>{ing.nombre}</option>)}
+          </select>
+          <input type="number" step="0.01" name="cantidad" placeholder="Cantidad que entra" className="w-full md:w-40 p-2 border rounded" required />
+          <input type="number" step="0.01" name="nuevoCosto" placeholder="Nuevo Costo Unitario $" className="w-full md:w-48 p-2 border rounded" required />
+          <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-bold">Actualizar Stock</button>
+        </form>
+        <p className="text-xs text-gray-500 mt-2">Al actualizar el costo unitario, las próximas ventas calcularán la ganancia con este nuevo valor.</p>
+      </div>
+
+      <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100 overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="bg-gray-50 text-gray-600 border-b border-gray-200">
+            <tr className="bg-gray-50 text-gray-600 border-b">
               <th className="p-3 font-medium">Ingrediente</th>
-              <th className="p-3 font-medium">Unidad</th>
               <th className="p-3 font-medium">Costo Unit.</th>
               <th className="p-3 font-medium">Stock Actual</th>
               <th className="p-3 font-medium">Estado</th>
@@ -460,26 +474,65 @@ export default function App() {
           </thead>
           <tbody>
             {ingredientes.map(ing => (
-              <tr key={ing.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                <td className="p-3 font-medium text-gray-800">{ing.nombre}</td>
-                <td className="p-3 text-gray-500">{ing.unidad}</td>
+              <tr key={ing.id} className="border-b border-gray-100">
+                <td className="p-3 font-medium">{ing.nombre} <span className="text-xs text-gray-400">({ing.unidad})</span></td>
                 <td className="p-3 text-gray-600">${ing.costo}</td>
                 <td className="p-3 font-bold text-gray-900">{ing.stock}</td>
                 <td className="p-3">
                   {ing.stock <= ing.stockMinimo ? (
-                    <span className="inline-flex items-center gap-1 bg-red-100 text-red-700 px-2 py-1 rounded-full text-xs font-bold">
-                      <AlertCircle className="w-3 h-3" /> ¡Comprar! (Min: {ing.stockMinimo})
-                    </span>
+                    <span className="text-red-600 font-bold text-xs flex items-center gap-1"><AlertCircle className="w-3 h-3"/> ¡Comprar!</span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs font-bold">
-                      <CheckCircle2 className="w-3 h-3" /> Óptimo
-                    </span>
+                    <span className="text-green-600 font-bold text-xs flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Óptimo</span>
                   )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+
+  const ViewPOS = () => (
+    <div className="flex flex-col md:flex-row gap-6 h-full">
+      <div className="flex-1 bg-white p-6 rounded-xl shadow-md border border-gray-100">
+        <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+          <Utensils className="w-6 h-6 text-orange-500" /> Vender Producto
+        </h2>
+        {productos.length === 0 ? (
+          <p className="text-gray-500">Ve a "Catálogo y Precios" para crear tus productos.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {productos.map(prod => (
+              <button key={prod.id} onClick={() => setCarrito([...carrito, prod])} className="p-4 border-2 border-gray-200 rounded-xl hover:border-orange-500 transition-all text-left">
+                <h3 className="text-lg font-bold text-gray-800">{prod.nombre}</h3>
+                <p className="text-2xl font-black text-gray-900 mt-2">${prod.precioVenta}</p>
+                <p className="text-xs text-gray-500 mt-1">Costo: ${calcularCostoReceta(prod.receta)}</p>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="w-full md:w-96 bg-gray-50 p-6 rounded-xl shadow-md border border-gray-200 flex flex-col">
+        <h2 className="text-xl font-bold text-gray-800 mb-4">Pedido Actual</h2>
+        <div className="flex-1 overflow-y-auto space-y-2 mb-4 min-h-[200px]">
+          {carrito.map((item, index) => (
+            <div key={index} className="flex justify-between items-center bg-white p-3 rounded border">
+              <span className="font-medium">{item.nombre}</span>
+              <span className="font-bold">${item.precioVenta}</span>
+            </div>
+          ))}
+        </div>
+        <div className="pt-4 border-t border-gray-200">
+          <div className="flex justify-between items-center mb-4">
+            <span className="text-lg font-medium text-gray-600">Total:</span>
+            <span className="text-3xl font-black text-gray-900">${carrito.reduce((acc, item) => acc + item.precioVenta, 0)}</span>
+          </div>
+          <button onClick={procesarVenta} disabled={carrito.length === 0} className="w-full bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white font-bold py-4 rounded-xl text-lg">
+            Cobrar y Descontar Stock
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -556,7 +609,6 @@ export default function App() {
 
   const ViewFinance = () => (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* Módulo de Deudas / Fiado */}
       <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100">
         <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2">
           <Wallet className="w-6 h-6 text-red-500" /> Cuentas por Pagar (Fiado)
@@ -588,7 +640,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Módulo de Gastos Varios */}
       <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100">
         <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2">
           <TrendingDown className="w-6 h-6 text-orange-500" /> Gastos Operativos
@@ -616,59 +667,41 @@ export default function App() {
     </div>
   );
 
-
-  // --- LAYOUT PRINCIPAL ---
-  if (!user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-         <div className="text-center">
-           <div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-           <p className="text-gray-600 font-bold animate-pulse">Conectando a la nube segura...</p>
-         </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row font-sans">
-      
-      {/* SIDEBAR NAVEGACIÓN */}
+    <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row font-sans relative">
+      {notificacion && (
+        <div className="absolute top-4 right-4 bg-gray-800 text-white px-6 py-3 rounded-lg shadow-2xl z-50 animate-bounce">
+          {notificacion}
+        </div>
+      )}
       <nav className="w-full md:w-64 bg-gray-900 text-gray-300 p-4 flex flex-col gap-2 shadow-2xl z-10">
         <div className="px-4 py-6 mb-4">
-          <h1 className="text-2xl font-black text-white tracking-tight">
-            SANCHO<span className="text-orange-500">PLANCHA</span>
-          </h1>
-          <p className="text-xs text-gray-400 mt-1 uppercase tracking-widest">Control & ERP</p>
+          <h1 className="text-2xl font-black text-white tracking-tight">SANCHO<span className="text-orange-500">PLANCHA</span></h1>
         </div>
-
-        <button onClick={() => setActiveTab('dashboard')} className={`flex items-center gap-3 w-full p-3 rounded-lg text-left transition-colors font-medium ${activeTab === 'dashboard' ? 'bg-orange-500 text-white' : 'hover:bg-gray-800 hover:text-white'}`}>
-          <LayoutDashboard className="w-5 h-5" /> Dashboard
-        </button>
-        <button onClick={() => setActiveTab('pos')} className={`flex items-center gap-3 w-full p-3 rounded-lg text-left transition-colors font-medium ${activeTab === 'pos' ? 'bg-orange-500 text-white' : 'hover:bg-gray-800 hover:text-white'}`}>
-          <ShoppingCart className="w-5 h-5" /> Punto de Venta
-        </button>
-        <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-3 w-full p-3 rounded-lg text-left transition-colors font-medium ${activeTab === 'inventory' ? 'bg-orange-500 text-white' : 'hover:bg-gray-800 hover:text-white'}`}>
-          <Package className="w-5 h-5" /> Inventario
-        </button>
-        <button onClick={() => setActiveTab('hr')} className={`flex items-center gap-3 w-full p-3 rounded-lg text-left transition-colors font-medium ${activeTab === 'hr' ? 'bg-orange-500 text-white' : 'hover:bg-gray-800 hover:text-white'}`}>
-          <Users className="w-5 h-5" /> Empleados
-        </button>
-        <button onClick={() => setActiveTab('finance')} className={`flex items-center gap-3 w-full p-3 rounded-lg text-left transition-colors font-medium ${activeTab === 'finance' ? 'bg-orange-500 text-white' : 'hover:bg-gray-800 hover:text-white'}`}>
-          <Wallet className="w-5 h-5" /> Finanzas y Fiado
-        </button>
+        {[
+          { id: 'dashboard', icon: LayoutDashboard, text: 'Dashboard' },
+          { id: 'pos', icon: ShoppingCart, text: 'Punto de Venta' },
+          { id: 'inventory', icon: Package, text: 'Inventario y Compras' },
+          { id: 'catalog', icon: Settings, text: 'Catálogo y Precios' },
+          { id: 'hr', icon: Users, text: 'Empleados' },
+          { id: 'finance', icon: Wallet, text: 'Finanzas y Fiado' },
+        ].map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-3 p-3 rounded-lg text-left font-medium ${activeTab === tab.id ? 'bg-orange-500 text-white' : 'hover:bg-gray-800'}`}>
+            <tab.icon className="w-5 h-5" /> {tab.text}
+          </button>
+        ))}
       </nav>
 
-      {/* ÁREA DE CONTENIDO */}
       <main className="flex-1 p-4 md:p-8 overflow-y-auto">
         <div className="max-w-6xl mx-auto">
           {activeTab === 'dashboard' && <ViewDashboard />}
           {activeTab === 'pos' && <ViewPOS />}
           {activeTab === 'inventory' && <ViewInventory />}
+          {activeTab === 'catalog' && <ViewCatalog />}
           {activeTab === 'hr' && <ViewHR />}
           {activeTab === 'finance' && <ViewFinance />}
         </div>
       </main>
-
     </div>
   );
 }
