@@ -65,6 +65,7 @@ export default function App() {
       sub('ingredientes', setIngredientes),
       sub('productos', setProductos),
       sub('ventas', setVentas),
+      sub('empleados', setEmpleados),
       sub('jornadas', setJornadas),
       sub('gastos', setGastos),
       sub('deudas', setDeudas)
@@ -217,6 +218,25 @@ export default function App() {
     if (!user) return;
     await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'jornadas', id), { pagado: true });
     mostrarMensaje("Jornada pagada");
+  };
+
+  const crearEmpleado = async (e) => {
+    e.preventDefault();
+    if (!user) return;
+    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'empleados'), {
+      nombre: e.target.nombre.value,
+      valorHora: parseFloat(e.target.valorHora.value)
+    });
+    e.target.reset();
+    mostrarMensaje("Empleado registrado");
+  };
+
+  const actualizarValorHora = async (id, nuevoValor) => {
+    if (!user || isNaN(nuevoValor) || nuevoValor <= 0) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'empleados', id), {
+      valorHora: parseFloat(nuevoValor)
+    });
+    mostrarMensaje("Precio por hora actualizado");
   };
 
   const registrarGasto = async (e) => {
@@ -539,9 +559,44 @@ export default function App() {
 
   const ViewHR = () => (
     <div className="space-y-6">
+      {/* NUEVO PANEL: Gestión de Empleados */}
+      <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100">
+        <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <Users className="w-5 h-5 text-blue-500" /> Gestión de Personal
+        </h2>
+        
+        <form onSubmit={crearEmpleado} className="flex flex-col sm:flex-row gap-3 mb-6">
+          <input type="text" name="nombre" placeholder="Nombre del empleado" className="flex-1 p-2 border rounded" required />
+          <input type="number" step="0.01" name="valorHora" placeholder="Pago por Hora $" className="w-full sm:w-40 p-2 border rounded" required />
+          <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-bold">Agregar Empleado</button>
+        </form>
+
+        <div className="space-y-2">
+          {empleados.map(emp => (
+            <div key={emp.id} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
+              <span className="font-medium text-gray-800">{emp.nombre}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500">$/hora:</span>
+                <input 
+                  type="number" 
+                  defaultValue={emp.valorHora} 
+                  onBlur={(e) => actualizarValorHora(emp.id, e.target.value)}
+                  className="w-24 p-1 border rounded text-right focus:ring-blue-500 focus:border-blue-500"
+                />
+                <button onClick={() => eliminarDoc('empleados', emp.id)} className="text-red-500 hover:text-red-700 ml-2" title="Eliminar empleado">
+                  <Trash2 className="w-4 h-4"/>
+                </button>
+              </div>
+            </div>
+          ))}
+          {empleados.length === 0 && <p className="text-sm text-gray-500">No hay empleados registrados.</p>}
+        </div>
+      </div>
+
+      {/* PANEL EXISTENTE: Registro de Jornadas */}
       <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100">
         <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-          <Users className="w-6 h-6 text-purple-500" /> Recursos Humanos (Horas Trabajadas)
+          <Users className="w-6 h-6 text-purple-500" /> Registro de Horas Trabajadas
         </h2>
         
         <form onSubmit={registrarJornada} className="flex flex-col sm:flex-row gap-4 items-end mb-8 bg-purple-50 p-4 rounded-lg border border-purple-100">
@@ -579,7 +634,7 @@ export default function App() {
               {jornadas.map(j => (
                 <tr key={j.id} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="p-3 text-sm">{new Date(j.fecha).toLocaleDateString()}</td>
-                  <td className="p-3 font-medium text-gray-800">{empleados.find(e => e.id === j.empleadoId)?.nombre}</td>
+                  <td className="p-3 font-medium text-gray-800">{empleados.find(e => e.id === j.empleadoId)?.nombre || 'Empleado Eliminado'}</td>
                   <td className="p-3 text-gray-600">{j.horas}h</td>
                   <td className="p-3 font-bold text-gray-900">${j.totalAPagar}</td>
                   <td className="p-3">
