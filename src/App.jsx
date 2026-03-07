@@ -1,30 +1,23 @@
 import React, { useState, useMemo, useEffect } from 'react';
+// Agregué todas las funciones de Firestore que te faltaban para guardar/borrar datos
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
+import { auth, db } from "./firebase/config"; 
+import { signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { useAuth } from "./context/AuthContext"; 
+
 import { 
   LayoutDashboard, ShoppingCart, Package, Utensils, 
   Users, Wallet, Plus, AlertCircle, CheckCircle2,
   TrendingUp, TrendingDown, DollarSign, Settings, Trash2
 } from 'lucide-react';
 
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
-
-const firebaseConfig = {
-  apiKey: "AIzaSyAFl5q6u4WYsv60wOJk0-DJp4vtUYUBqgo",
-  authDomain: "sancho-plancha.firebaseapp.com",
-  projectId: "sancho-plancha",
-  storageBucket: "sancho-plancha.firebasestorage.app",
-  messagingSenderId: "112778410330",
-  appId: "1:112778410330:web:0ddaeb69f8b1f7b7ce5b63"
-};
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
 export default function App() {
+  const { user, role, loading } = useAuth(); 
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [errorLogin, setErrorLogin] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [user, setUser] = useState(null);
   const [notificacion, setNotificacion] = useState('');
   
   const [ingredientes, setIngredientes] = useState([]);
@@ -34,31 +27,33 @@ export default function App() {
   const [jornadas, setJornadas] = useState([]);
   const [gastos, setGastos] = useState([]);
   const [deudas, setDeudas] = useState([]);
-
   const [carrito, setCarrito] = useState([]);
-  
-  // Estado para armar recetas nuevas en el panel de administración
   const [recetaTemp, setRecetaTemp] = useState([]);
 
-  useEffect(() => {
-    const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
-    return () => unsubscribe();
-  }, []);
+  // --- LÓGICA DE AUTENTICACIÓN ---
+  const iniciarSesion = async (e) => {
+    e.preventDefault(); 
+    setErrorLogin('');
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (error) {
+      setErrorLogin('Credenciales incorrectas. Revisá el mail o la clave.');
+    }
+  };
 
+  const cerrarSesion = async () => {
+    await signOut(auth);
+  };
+
+  // --- SINCRONIZACIÓN CON BASE DE DATOS (USE EFFECT CORREGIDO) ---
   useEffect(() => {
-    if (!user) return;
-    const path = (colName) => collection(db, 'artifacts', appId, 'users', user.uid, colName);
+    if (!user) return; // Si no hay usuario, no busca datos
+
+    const path = (colName) => collection(db, 'users', user.uid, colName);
+    
     const sub = (colName, setter) => onSnapshot(path(colName), 
       (snap) => setter(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
-      (err) => console.error(err)
+      (err) => console.error(`Error cargando ${colName}:`, err)
     );
 
     const unsubs = [
@@ -70,6 +65,7 @@ export default function App() {
       sub('gastos', setGastos),
       sub('deudas', setDeudas)
     ];
+    
     return () => unsubs.forEach(u => u());
   }, [user]);
 
@@ -79,7 +75,6 @@ export default function App() {
   };
 
   // --- LÓGICA CORE Y VENTAS ---
-
   const calcularCostoReceta = (receta) => {
     return receta.reduce((total, itemReceta) => {
       const ingrediente = ingredientes.find(i => i.id === itemReceta.ingredienteId);
@@ -106,7 +101,7 @@ export default function App() {
     });
 
     try {
-      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'ventas'), {
+      await addDoc(collection(db, 'users', user.uid, 'ventas'), {
         fecha: new Date().toISOString(),
         items: carrito,
         totalIngreso,
@@ -115,7 +110,7 @@ export default function App() {
       });
       
       for (const [id, nuevoStock] of Object.entries(ingredientesAActualizar)) {
-        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'ingredientes', id), { stock: nuevoStock });
+        await updateDoc(doc(db, 'users', user.uid, 'ingredientes', id), { stock: nuevoStock });
       }
 
       setCarrito([]);
@@ -126,24 +121,31 @@ export default function App() {
   };
 
   // --- LÓGICA DE ADMINISTRACIÓN Y CATÁLOGO ---
-
+  // --- LÓGICA DE ADMINISTRACIÓN Y CATÁLOGO ---
   const crearIngrediente = async (e) => {
     e.preventDefault();
     if (!user) return;
-    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'ingredientes'), {
+
+    // 1. Empaquetamos los datos primero
+    const nuevoDoc = {
       nombre: e.target.nombre.value,
       unidad: e.target.unidad.value,
       costo: parseFloat(e.target.costo.value),
       stock: parseFloat(e.target.stock.value),
       stockMinimo: parseFloat(e.target.stockMinimo.value)
-    });
+    };
+
+    // 2. Limpiamos la cinta de inmediato para que sigas tipeando
     e.target.reset();
+
+    // 3. Mandamos a la nube en segundo plano
+    await addDoc(collection(db, 'users', user.uid, 'ingredientes'), nuevoDoc);
     mostrarMensaje("Ingrediente creado con éxito");
   };
 
   const eliminarDoc = async (coleccion, id) => {
     if (!user) return;
-    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, coleccion, id));
+    await deleteDoc(doc(db, 'users', user.uid, coleccion, id));
     mostrarMensaje("Elemento eliminado");
   };
 
@@ -164,13 +166,17 @@ export default function App() {
       mostrarMensaje("Agrega al menos un ingrediente a la receta.");
       return;
     }
-    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'productos'), {
+
+    const nuevoDoc = {
       nombre: e.target.nombre.value,
       precioVenta: parseFloat(e.target.precioVenta.value),
       receta: recetaTemp.map(r => ({ ingredienteId: r.ingredienteId, cantidad: r.cantidad }))
-    });
+    };
+
     e.target.reset();
-    setRecetaTemp([]);
+    setRecetaTemp([]); // Vaciamos la receta temporal al instante
+
+    await addDoc(collection(db, 'users', user.uid, 'productos'), nuevoDoc);
     mostrarMensaje("Producto guardado con éxito");
   };
 
@@ -182,58 +188,71 @@ export default function App() {
     const nuevoCosto = parseFloat(e.target.nuevoCosto.value);
     
     const ingActual = ingredientes.find(i => i.id === ingId);
+    
+    e.target.reset(); // Limpiamos al instante
+
     if(ingActual) {
-      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'ingredientes', ingId), {
+      await updateDoc(doc(db, 'users', user.uid, 'ingredientes', ingId), {
         stock: ingActual.stock + cantidadComprada,
         costo: nuevoCosto || ingActual.costo
       });
-      e.target.reset();
       mostrarMensaje("Stock y costo actualizados");
     }
   };
 
   // --- LÓGICA DE RRHH Y FINANZAS ---
-
+// --- LÓGICA DE RRHH Y FINANZAS ---
   const registrarJornada = async (e) => {
     e.preventDefault();
     if (!user) return;
+    
     const empleadoId = e.target.empleadoId.value;
     const horas = parseFloat(e.target.horas.value);
+    const fechaElegida = e.target.fechaJornada.value;
+    const fechaFinal = new Date(fechaElegida + 'T12:00:00').toISOString();
     const empleado = empleados.find(emp => emp.id === empleadoId);
     
     if (empleado && horas) {
-      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'jornadas'), {
+      const nuevoDoc = {
         empleadoId,
-        fecha: new Date().toISOString(),
+        fecha: fechaFinal,
         horas,
         totalAPagar: horas * empleado.valorHora,
         pagado: false
-      });
+      };
+
       e.target.reset();
+      e.target.fechaJornada.value = new Date().toISOString().split('T')[0];
+
+      await addDoc(collection(db, 'users', user.uid, 'jornadas'), nuevoDoc);
       mostrarMensaje("Jornada registrada");
     }
   };
 
   const pagarJornada = async (id) => {
     if (!user) return;
-    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'jornadas', id), { pagado: true });
+    await updateDoc(doc(db, 'users', user.uid, 'jornadas', id), { pagado: true });
     mostrarMensaje("Jornada pagada");
   };
 
   const crearEmpleado = async (e) => {
     e.preventDefault();
     if (!user) return;
-    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'empleados'), {
+
+    const nuevoDoc = {
       nombre: e.target.nombre.value,
       valorHora: parseFloat(e.target.valorHora.value)
-    });
+    };
+
     e.target.reset();
+
+    await addDoc(collection(db, 'users', user.uid, 'empleados'), nuevoDoc);
     mostrarMensaje("Empleado registrado");
   };
 
   const actualizarValorHora = async (id, nuevoValor) => {
     if (!user || isNaN(nuevoValor) || nuevoValor <= 0) return;
-    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'empleados', id), {
+    await updateDoc(doc(db, 'users', user.uid, 'empleados', id), {
       valorHora: parseFloat(nuevoValor)
     });
     mostrarMensaje("Precio por hora actualizado");
@@ -242,36 +261,43 @@ export default function App() {
   const registrarGasto = async (e) => {
     e.preventDefault();
     if (!user) return;
-    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'gastos'), {
+
+    const nuevoDoc = {
       descripcion: e.target.descripcion.value,
       monto: parseFloat(e.target.monto.value),
       fecha: new Date().toISOString()
-    });
+    };
+
     e.target.reset();
+
+    await addDoc(collection(db, 'users', user.uid, 'gastos'), nuevoDoc);
     mostrarMensaje("Gasto registrado");
   };
 
   const registrarDeuda = async (e) => {
     e.preventDefault();
     if (!user) return;
-    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'deudas'), {
+
+    const nuevoDoc = {
       proveedor: e.target.proveedor.value,
       monto: parseFloat(e.target.monto.value),
       fecha: new Date().toISOString(),
       pagado: false
-    });
+    };
+
     e.target.reset();
+
+    await addDoc(collection(db, 'users', user.uid, 'deudas'), nuevoDoc);
     mostrarMensaje("Deuda registrada");
   };
 
   const pagarDeuda = async (id) => {
     if (!user) return;
-    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'deudas', id), { pagado: true });
+    await updateDoc(doc(db, 'users', user.uid, 'deudas', id), { pagado: true });
     mostrarMensaje("Deuda saldada");
   };
 
   // --- CÁLCULOS DEL DASHBOARD ---
-
   const stats = useMemo(() => {
     const ventasTotales = ventas.reduce((acc, v) => acc + v.totalIngreso, 0);
     const costoMateriaPrima = ventas.reduce((acc, v) => acc + v.totalCosto, 0);
@@ -283,15 +309,7 @@ export default function App() {
 
     const gananciaNeta = ventasTotales - (costoMateriaPrima + sueldosPagados + gastosOperativos + deudasPagadas);
 
-    return {
-      ventasTotales,
-      costoMateriaPrima,
-      sueldosPagados,
-      sueldosPendientes,
-      gastosOperativos,
-      deudasPendientes,
-      gananciaNeta
-    };
+    return { ventasTotales, costoMateriaPrima, sueldosPagados, sueldosPendientes, gastosOperativos, deudasPendientes, gananciaNeta };
   }, [ventas, jornadas, gastos, deudas]);
 
   // --- VISTAS ---
@@ -567,28 +585,50 @@ export default function App() {
         
         <form onSubmit={crearEmpleado} className="flex flex-col sm:flex-row gap-3 mb-6">
           <input type="text" name="nombre" placeholder="Nombre del empleado" className="flex-1 p-2 border rounded" required />
-          <input type="number" step="0.01" name="valorHora" placeholder="Pago por Hora $" className="w-full sm:w-40 p-2 border rounded" required />
           <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-bold">Agregar Empleado</button>
         </form>
 
-        <div className="space-y-2">
-          {empleados.map(emp => (
-            <div key={emp.id} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
-              <span className="font-medium text-gray-800">{emp.nombre}</span>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-500">$/hora:</span>
-                <input 
-                  type="number" 
-                  defaultValue={emp.valorHora} 
-                  onBlur={(e) => actualizarValorHora(emp.id, e.target.value)}
-                  className="w-24 p-1 border rounded text-right focus:ring-blue-500 focus:border-blue-500"
-                />
-                <button onClick={() => eliminarDoc('empleados', emp.id)} className="text-red-500 hover:text-red-700 ml-2" title="Eliminar empleado">
-                  <Trash2 className="w-4 h-4"/>
-                </button>
+<div className="space-y-2">
+          {empleados.map(emp => {
+            // 1. Lógica: Calculamos la deuda sumando las jornadas no pagadas
+            const deudaAcumulada = jornadas
+              .filter(j => j.empleadoId === emp.id && !j.pagado)
+              .reduce((acc, j) => acc + j.totalAPagar, 0);
+
+            // 2. Vista: Devolvemos el diseño de la fila
+            return (
+              <div key={emp.id} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
+                
+                {/* Lado izquierdo: Nombre y Cartelito de Deuda */}
+                <div className="flex items-center gap-3">
+                  <span className="font-medium text-gray-800">{emp.nombre}</span>
+                  {deudaAcumulada > 0 ? (
+                    <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-1 rounded-full border border-red-200">
+                      Deuda: ${deudaAcumulada}
+                    </span>
+                  ) : (
+                    <span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-1 rounded-full border border-green-200">
+                      Al día
+                    </span>
+                  )}
+                </div>
+
+                {/* Lado derecho: Costo por hora y tachito */}
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500">$/hora:</span>
+                  <input 
+                    type="number" 
+                    defaultValue={emp.valorHora} 
+                    onBlur={(e) => actualizarValorHora(emp.id, e.target.value)}
+                    className="w-24 p-1 border rounded text-right focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <button onClick={() => eliminarDoc('empleados', emp.id)} className="text-red-500 hover:text-red-700 ml-2" title="Eliminar empleado">
+                    <Trash2 className="w-4 h-4"/>
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           {empleados.length === 0 && <p className="text-sm text-gray-500">No hay empleados registrados.</p>}
         </div>
       </div>
@@ -599,7 +639,7 @@ export default function App() {
           <Users className="w-6 h-6 text-purple-500" /> Registro de Horas Trabajadas
         </h2>
         
-        <form onSubmit={registrarJornada} className="flex flex-col sm:flex-row gap-4 items-end mb-8 bg-purple-50 p-4 rounded-lg border border-purple-100">
+<form onSubmit={registrarJornada} className="flex flex-col sm:flex-row gap-4 items-end mb-8 bg-purple-50 p-4 rounded-lg border border-purple-100">
           <div className="flex-1 w-full">
             <label className="block text-sm font-medium text-gray-700 mb-1">Empleado</label>
             <select name="empleadoId" className="w-full p-2 border border-gray-300 rounded focus:ring-purple-500 focus:border-purple-500" required>
@@ -608,6 +648,19 @@ export default function App() {
               ))}
             </select>
           </div>
+          
+          {/* NUEVO CAMPO: Selector de Día */}
+          <div className="w-full sm:w-40">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Día de trabajo</label>
+            <input 
+              type="date" 
+              name="fechaJornada" 
+              defaultValue={new Date().toISOString().split('T')[0]} 
+              className="w-full p-2 border border-gray-300 rounded focus:ring-purple-500 focus:border-purple-500" 
+              required 
+            />
+          </div>
+
           <div className="w-full sm:w-32">
             <label className="block text-sm font-medium text-gray-700 mb-1">Horas trab.</label>
             <input type="number" step="0.5" name="horas" className="w-full p-2 border border-gray-300 rounded focus:ring-purple-500 focus:border-purple-500" required />
@@ -643,12 +696,18 @@ export default function App() {
                       : <span className="text-red-600 text-sm font-bold">Pendiente</span>
                     }
                   </td>
+
                   <td className="p-3">
                     {!j.pagado && (
                       <button onClick={() => pagarJornada(j.id)} className="bg-gray-800 hover:bg-gray-900 text-white text-xs px-3 py-1 rounded font-medium">
                         Marcar Pagado
                       </button>
                     )}
+
+                    <button onClick={() => eliminarDoc('jornadas', j.id)} className="text-red-500 hover:text-red-700 p-1 align-middle" title="Eliminar jornada">
+                      <Trash2 className="w-4 h-4"/>
+                    </button>
+
                   </td>
                 </tr>
               ))}
@@ -662,7 +721,7 @@ export default function App() {
     </div>
   );
 
-  const ViewFinance = () => (
+const ViewFinance = () => (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100">
         <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2">
@@ -682,13 +741,17 @@ export default function App() {
                 <p className={`font-bold ${d.pagado ? 'text-gray-600 line-through' : 'text-gray-900'}`}>{d.proveedor}</p>
                 <p className="text-xs text-gray-500">{new Date(d.fecha).toLocaleDateString()}</p>
               </div>
-              <div className="text-right flex items-center gap-4">
+              <div className="text-right flex items-center gap-2">
                 <span className={`font-black text-lg ${d.pagado ? 'text-gray-400' : 'text-red-600'}`}>${d.monto}</span>
                 {!d.pagado && (
                   <button onClick={() => pagarDeuda(d.id)} className="bg-green-500 hover:bg-green-600 text-white text-xs px-3 py-1 rounded font-bold transition-colors">
                     Pagar
                   </button>
                 )}
+                {/* ESTE ES EL BOTÓN DE BORRAR QUE FALTABA */}
+                <button onClick={() => eliminarDoc('deudas', d.id)} className="text-red-500 hover:text-red-700 ml-2" title="Eliminar registro">
+                  <Trash2 className="w-5 h-5"/>
+                </button>
               </div>
             </div>
           ))}
@@ -713,7 +776,13 @@ export default function App() {
                 <p className="font-medium text-gray-800">{g.descripcion}</p>
                 <p className="text-xs text-gray-500">{new Date(g.fecha).toLocaleDateString()}</p>
               </div>
-              <span className="font-bold text-gray-600">${g.monto}</span>
+              {/* ACÁ TAMBIÉN AGREGAMOS EL BOTÓN DE BORRAR PARA LOS GASTOS */}
+              <div className="flex items-center gap-3">
+                <span className="font-bold text-gray-600">${g.monto}</span>
+                <button onClick={() => eliminarDoc('gastos', g.id)} className="text-red-500 hover:text-red-700" title="Eliminar gasto">
+                  <Trash2 className="w-4 h-4"/>
+                </button>
+              </div>
             </div>
           ))}
           {gastos.length === 0 && <p className="text-gray-500 text-sm">No hay gastos registrados.</p>}
@@ -722,6 +791,41 @@ export default function App() {
     </div>
   );
 
+    // ==========================================
+  // RENDER PRINCIPAL (EL GUARDIA DE SEGURIDAD)
+  // ==========================================
+
+  // 1. Pantalla de carga mientras React averigua si estás logueado
+  if (loading) return <div className="p-10 text-center font-bold text-xl mt-20">Arrancando motores...</div>;
+
+  // 2. Si NO hay usuario, mostramos el Formulario (Candado)
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-200">
+        <form onSubmit={iniciarSesion} className="p-8 bg-white rounded shadow-lg w-96">
+          <h2 className="text-2xl font-bold mb-6 text-center text-orange-600">Acceso al ERP</h2>
+          
+          {errorLogin && <p className="text-red-500 mb-4 text-sm font-bold text-center">{errorLogin}</p>}
+          
+          <input 
+            type="email" placeholder="Tu correo" 
+            className="w-full p-2 mb-4 border rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
+            value={email} onChange={(e) => setEmail(e.target.value)}
+          />
+          <input 
+            type="password" placeholder="Tu contraseña" 
+            className="w-full p-2 mb-6 border rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
+            value={password} onChange={(e) => setPassword(e.target.value)}
+          />
+          <button type="submit" className="w-full bg-orange-600 hover:bg-orange-700 text-white p-2 rounded font-bold transition-colors">
+            Ingresar al Sistema
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  // 3. Si PASÓ la seguridad, mostramos tu sistema completo
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row font-sans relative">
       {notificacion && (
@@ -748,6 +852,28 @@ export default function App() {
       </nav>
 
       <main className="flex-1 p-4 md:p-8 overflow-y-auto">
+        
+        {/* BARRA SUPERIOR NUEVA: Muestra tu usuario y el botón de salir */}
+        <div className="flex flex-col sm:flex-row justify-between items-center mb-6 bg-white p-4 rounded shadow border border-gray-200">
+          <h1 className="text-2xl font-bold text-gray-800">Panel Central</h1>
+          <div className="flex gap-4 items-center mt-4 sm:mt-0">
+            <span className="bg-gray-100 px-3 py-1 rounded text-sm border">
+              Usuario: <strong>{user.email}</strong> | Rango: <strong className="uppercase text-orange-600">{role || 'Cargando...'}</strong>
+            </span>
+            <button onClick={cerrarSesion} className="bg-red-500 hover:bg-red-600 text-white px-4 py-1 rounded text-sm font-bold">
+              Salir
+            </button>
+          </div>
+        </div>
+
+        {/* ALERTA DE JEFE */}
+        {role === 'admin' && (
+          <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6">
+            <p className="font-bold">¡Bienvenido Jefe!</p>
+            <p>Tenés control total sobre la base de datos.</p>
+          </div>
+        )}
+
         <div className="max-w-6xl mx-auto">
           {activeTab === 'dashboard' && <ViewDashboard />}
           {activeTab === 'pos' && <ViewPOS />}
