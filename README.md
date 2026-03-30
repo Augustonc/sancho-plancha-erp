@@ -7,7 +7,7 @@
 
 Sistema de Planificación de Recursos Empresariales (ERP) diseñado a medida para la gestión integral del food truck **Sancho Plancha**. Permite administrar ventas, inventario, personal y finanzas en tiempo real mediante una interfaz rápida y optimizada para el uso operativo.
 
-🚀 **Demo en vivo:** [https://sancho-plancha-erp.vercel.app](https://sancho-plancha-erp.vercel.app)
+🚀 **Demo en vivo:** [https://sancho-plancha-erp.vercel.app](https://sancho-plancha-erp.vercel.app) (No disponible en este momento, se está desarrollando la seguridad y niveles de usuarios)
 
 ---
 
