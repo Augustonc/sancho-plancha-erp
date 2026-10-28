@@ -1,1 +1,23 @@
 @import "tailwindcss";
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  #ticket-imprimible, #ticket-imprimible * {
+    visibility: visible !important;
+  }
+  #ticket-imprimible {
+    position: fixed !important;
+    left: 50% !important;
+    top: 10px !important;
+    transform: translateX(-50%) !important;
+    width: 300px !important;
+    margin: 0 !important;
+    padding: 12px !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: white !important;
+    color: black !important;
+  }
+}
