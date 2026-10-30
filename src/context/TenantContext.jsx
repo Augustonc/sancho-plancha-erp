@@ -1,16 +1,20 @@
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext } from 'react';
+import { useAuth } from './AuthContext';
 
 const TenantContext = createContext();
 
+/**
+ * Expone la sucursal activa. El tenantId ya no está fijo en el código:
+ * se deriva del perfil del usuario logueado (/users/{uid}.tenantId).
+ *
+ * En el futuro, acá se puede agregar `switchTenant(newId)` para usuarios
+ * con acceso a varias sucursales.
+ */
 export const TenantProvider = ({ children }) => {
-  // Inicializamos con el ID de prueba para que apunte al entorno de desarrollo
-  const [tenantId, setTenantId] = useState('sancho_plancha_dev_01');
-
-  // En el futuro, podríamos añadir funciones aquí como `switchTenant(newId)`
-  // que permita cambiar de sucursal.
+  const { tenantId } = useAuth();
 
   return (
-    <TenantContext.Provider value={{ tenantId, setTenantId }}>
+    <TenantContext.Provider value={{ tenantId }}>
       {children}
     </TenantContext.Provider>
   );

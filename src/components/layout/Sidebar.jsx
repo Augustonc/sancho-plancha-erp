@@ -3,16 +3,23 @@ import {
   LayoutDashboard, ShoppingCart, Package,
   Users, Wallet, Settings
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { getAllowedTabs } from '../../config/roles';
+
+const TABS = [
+  { id: 'dashboard', icon: LayoutDashboard, text: 'Panel General' },
+  { id: 'pos', icon: ShoppingCart, text: 'Punto de Venta' },
+  { id: 'inventory', icon: Package, text: 'Inventario y Compras' },
+  { id: 'catalog', icon: Settings, text: 'Catálogo y Precios' },
+  { id: 'hr', icon: Users, text: 'Empleados' },
+  { id: 'finance', icon: Wallet, text: 'Finanzas y Fiado' },
+];
 
 export default function Sidebar({ activeTab, setActiveTab }) {
-  const tabs = [
-    { id: 'dashboard', icon: LayoutDashboard, text: 'Panel General' },
-    { id: 'pos', icon: ShoppingCart, text: 'Punto de Venta' },
-    { id: 'inventory', icon: Package, text: 'Inventario y Compras' },
-    { id: 'catalog', icon: Settings, text: 'Catálogo y Precios' },
-    { id: 'hr', icon: Users, text: 'Empleados' },
-    { id: 'finance', icon: Wallet, text: 'Finanzas y Fiado' },
-  ];
+  // Solo se muestran las pestañas habilitadas para el rol del usuario logueado
+  const { role } = useAuth();
+  const allowedTabs = getAllowedTabs(role);
+  const tabs = TABS.filter(tab => allowedTabs.includes(tab.id));
 
   return (
     <nav className="w-full md:w-64 bg-gray-900 text-gray-300 p-4 flex flex-col gap-2 shadow-2xl z-10 shrink-0">
